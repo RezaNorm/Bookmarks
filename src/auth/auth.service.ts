@@ -8,10 +8,16 @@ import {
   PrismaClientInitializationError,
   PrismaClientKnownRequestError,
 } from '@prisma/client/runtime';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable({})
 export class AuthService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwt: JwtService,
+    private config: ConfigService,
+  ) {}
 
   async signup(dto: AuthDto) {
     // generate hashed password
@@ -29,7 +35,7 @@ export class AuthService {
           createdAt: true,
         },
       });
-      return user;
+      return this.signToken(user.id, user.email);
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -52,9 +58,21 @@ export class AuthService {
 
     // compared the entered password
     const passCompared = await argon.verify(user.password, dto.password);
-    delete user['password'];
+    // delete user['password'];
 
     if (!passCompared) throw new ForbiddenException('Wrong Credentials');
-    return user;
+    return this.signToken(user.id, user.email);
+  }
+
+  signToken(userId: Number, email: String): Promise<string> {
+    const data = {
+      sub: userId,
+      email,
+    };
+
+    return this.jwt.signAsync(data, {
+      expiresIn: '15m',
+      secret: this.config.get<string>('JWT_SECRET'),
+    });
   }
 }
