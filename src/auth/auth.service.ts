@@ -1,9 +1,13 @@
 /* eslint-disable prettier/prettier */
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { User, Bookmark } from '@prisma/client';
 import { AuthDto } from './dto';
 import * as argon from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  PrismaClientInitializationError,
+  PrismaClientKnownRequestError,
+} from '@prisma/client/runtime';
 
 @Injectable({})
 export class AuthService {
@@ -13,17 +17,44 @@ export class AuthService {
     // generate hashed password
     const password = await argon.hash(dto.password);
 
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          password,
+        },
+        select: {
+          id: true,
+          email: true,
+          createdAt: true,
+        },
+      });
+      return user;
+    } catch (error) {
+      if (error instanceof PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ForbiddenException('Credentials already exist');
+        }
+      }
+    }
     // save and return user in the database
-    return await this.prisma.user.create({
-      data: {
+  }
+
+  async signin(dto: AuthDto) {
+    // find the user w/ entered credentials
+    const user = await this.prisma.user.findUnique({
+      where: {
         email: dto.email,
-        password,
       },
     });
 
-  }
+    if (!user) throw new ForbiddenException('Wrong Credentials');
 
-  signin() {
-    return `fuck you`;
+    // compared the entered password
+    const passCompared = await argon.verify(user.password, dto.password);
+    delete user['password'];
+
+    if (!passCompared) throw new ForbiddenException('Wrong Credentials');
+    return user;
   }
 }
